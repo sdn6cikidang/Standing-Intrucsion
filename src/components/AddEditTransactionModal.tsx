@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, Vendor } from '../types';
-import { X, Save, PlusCircle, Store, Settings, FolderPlus } from 'lucide-react';
+import { Transaction, Vendor, HonorRecipient } from '../types';
+import { X, Save, PlusCircle, Store, Settings, FolderPlus, UserCheck, Copy, AlertTriangle, CreditCard } from 'lucide-react';
 import { DEFAULT_CATEGORIES } from './CategoryManagementModal';
 
 interface AddEditTransactionModalProps {
@@ -11,14 +11,63 @@ interface AddEditTransactionModalProps {
   nextNo: number;
   vendors: Vendor[];
   categories?: string[];
+  honorRecipients?: HonorRecipient[];
   onOpenVendorSettings?: () => void;
   onOpenCategoryManagement?: () => void;
+  onOpenHonorSettings?: () => void;
 }
 
 const INDONESIAN_MONTHS = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ];
+
+const ROMAN_MONTHS_MAP: Record<string, string> = {
+  Januari: 'I',
+  Februari: 'II',
+  Maret: 'III',
+  April: 'IV',
+  Mei: 'V',
+  Juni: 'VI',
+  Juli: 'VII',
+  Agustus: 'VIII',
+  September: 'IX',
+  Oktober: 'X',
+  November: 'XI',
+  Desember: 'XII',
+};
+
+const ROMAN_MONTHS_ARRAY = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+
+export function generateNonSiplahNoPo(
+  monthName?: string,
+  yearStr?: string,
+  isoDate?: string,
+  existingXxxx?: string
+): string {
+  const random4 = existingXxxx || String(Math.floor(1000 + Math.random() * 9000));
+
+  let roman = 'I';
+  if (monthName && ROMAN_MONTHS_MAP[monthName]) {
+    roman = ROMAN_MONTHS_MAP[monthName];
+  } else if (isoDate) {
+    const parts = isoDate.split('-');
+    if (parts.length === 3) {
+      const idx = Math.max(0, Math.min(11, parseInt(parts[1], 10) - 1));
+      roman = ROMAN_MONTHS_ARRAY[idx] || 'I';
+    }
+  }
+
+  let year = yearStr;
+  if (!year && isoDate) {
+    year = isoDate.split('-')[0];
+  }
+  if (!year) {
+    year = `${new Date().getFullYear()}`;
+  }
+
+  return `trx/${random4}/${roman}/${year}`;
+}
 
 const JENIS_TRANSAKSI_OPTIONS = [
   'Pembayaran Honor',
@@ -88,8 +137,10 @@ export function AddEditTransactionModal({
   nextNo,
   vendors,
   categories = DEFAULT_CATEGORIES,
+  honorRecipients = [],
   onOpenVendorSettings,
   onOpenCategoryManagement,
+  onOpenHonorSettings,
 }: AddEditTransactionModalProps) {
   const [dateIso, setDateIso] = useState('');
   const [formData, setFormData] = useState<Partial<Transaction>>({
@@ -128,6 +179,12 @@ export function AddEditTransactionModal({
         (initialData?.jenisTransaksi || '').toUpperCase().includes('PEMASUKAN') ||
         initialData?.siplah === 'BOS SALUR';
 
+      const currentSiplah = initialData?.siplah || 'Non Siplah';
+      let autoNoPo = initialData?.noPo || '';
+      if (currentSiplah === 'Non Siplah' && (!autoNoPo || autoNoPo.trim() === '')) {
+        autoNoPo = generateNonSiplahNoPo(month, year, iso);
+      }
+
       setFormData({
         ...initialData,
         id: initialData.id,
@@ -135,6 +192,7 @@ export function AddEditTransactionModal({
         tahun: initialData?.tahun || year,
         bulan: initialData?.bulan || month,
         vendor: initialData?.vendor || 'NON SIPLAH',
+        noPo: autoNoPo,
       });
     } else {
       const todayIso = new Date().toISOString().split('T')[0];
@@ -143,6 +201,7 @@ export function AddEditTransactionModal({
       const { year, month } = extractYearMonthFromIso(todayIso);
 
       const defaultVendor = vendors.find((v) => v.nama === 'NON SIPLAH') || vendors[0];
+      const defaultNoPo = generateNonSiplahNoPo(month, year, todayIso);
 
       setFormData({
         no: nextNo,
@@ -157,7 +216,7 @@ export function AddEditTransactionModal({
         ppn: '-',
         netto: 0,
         siplah: 'Non Siplah',
-        noPo: '',
+        noPo: defaultNoPo,
         keterangan: '',
         vendor: defaultVendor ? defaultVendor.nama : 'NON SIPLAH',
         vendorAddress: defaultVendor ? defaultVendor.alamat : '-',
@@ -180,27 +239,51 @@ export function AddEditTransactionModal({
     const formattedDmy = isoToDmy(newIso);
     const { year, month } = extractYearMonthFromIso(newIso);
 
-    setFormData((prev) => ({
-      ...prev,
-      tanggal: formattedDmy,
-      tahun: year,
-      bulan: month,
-    }));
+    setFormData((prev) => {
+      let updatedNoPo = prev.noPo || '';
+      if (prev.siplah === 'Non Siplah') {
+        const match = updatedNoPo.match(/^trx\/(\d{4})\//);
+        const existingXxxx = match ? match[1] : undefined;
+        updatedNoPo = generateNonSiplahNoPo(month, year, newIso, existingXxxx);
+      }
+      return {
+        ...prev,
+        tanggal: formattedDmy,
+        tahun: year,
+        bulan: month,
+        noPo: updatedNoPo,
+      };
+    });
   };
 
   const handleVendorSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedVendorName = e.target.value;
     const foundVendor = vendors.find((v) => v.nama === selectedVendorName);
+    const isSiplahVendor = selectedVendorName.toLowerCase().includes('siplah');
 
-    setFormData((prev) => ({
-      ...prev,
-      vendor: selectedVendorName,
-      vendorAddress: foundVendor?.alamat || prev.vendorAddress || '-',
-      vendorHp: foundVendor?.hp || prev.vendorHp || '-',
-      vendorNpwp: foundVendor?.npwp || prev.vendorNpwp || '-',
-      // Auto toggle Siplah status if Siplah is in vendor name or selected
-      siplah: selectedVendorName.toLowerCase().includes('siplah') ? 'Siplah' : prev.siplah,
-    }));
+    setFormData((prev) => {
+      const newSiplah = isSiplahVendor ? 'Siplah' : prev.siplah;
+      let updatedNoPo = prev.noPo || '';
+      if (newSiplah === 'Non Siplah') {
+        if (!updatedNoPo || !updatedNoPo.startsWith('trx/')) {
+          updatedNoPo = generateNonSiplahNoPo(prev.bulan, prev.tahun, dateIso);
+        }
+      } else if (newSiplah === 'Siplah') {
+        if (updatedNoPo.startsWith('trx/')) {
+          updatedNoPo = '';
+        }
+      }
+
+      return {
+        ...prev,
+        vendor: selectedVendorName,
+        vendorAddress: foundVendor?.alamat || prev.vendorAddress || '-',
+        vendorHp: foundVendor?.hp || prev.vendorHp || '-',
+        vendorNpwp: foundVendor?.npwp || prev.vendorNpwp || '-',
+        siplah: newSiplah,
+        noPo: updatedNoPo,
+      };
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -247,6 +330,8 @@ export function AddEditTransactionModal({
     onClose();
   };
 
+  const isDuplicate = Boolean(initialData && !initialData.id);
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8">
@@ -254,15 +339,30 @@ export function AddEditTransactionModal({
         {/* HEADER */}
         <div className="bg-slate-50 dark:bg-slate-800/60 px-6 py-4.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
-            <div className="w-9 h-9 bg-indigo-50 dark:bg-indigo-950/80 rounded-xl text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-100 dark:border-indigo-900/50">
-              <PlusCircle className="w-5 h-5" />
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+              isDuplicate
+                ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800'
+                : 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/50'
+            }`}>
+              {isDuplicate ? <Copy className="w-5 h-5" /> : <PlusCircle className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
-                {initialData ? 'Edit Data Transaksi' : 'Tambah Transaksi Baru'}
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                {initialData?.id
+                  ? 'Edit Data Transaksi'
+                  : isDuplicate
+                  ? 'Duplikat Transaksi (Data Baru)'
+                  : 'Tambah Transaksi Baru'}
+                {isDuplicate && (
+                  <span className="text-[10px] bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded-full font-bold border border-amber-200 dark:border-amber-800">
+                    Salin Tanggal & No. Surat
+                  </span>
+                )}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Isi rincian transaksi BOSP untuk dimasukkan ke database & Standing Instruction
+                {isDuplicate
+                  ? 'Membuat transaksi baru dengan Tanggal & No. Surat yang disamakan dari transaksi asal'
+                  : 'Isi rincian transaksi BOSP untuk dimasukkan ke database & Standing Instruction'}
               </p>
             </div>
           </div>
@@ -277,6 +377,16 @@ export function AddEditTransactionModal({
         {/* FORM */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
           
+          {/* DUPLICATE BANNER */}
+          {isDuplicate && (
+            <div className="bg-amber-500/10 border border-amber-300 dark:border-amber-700/80 rounded-xl p-3 flex items-center gap-2.5 text-amber-900 dark:text-amber-200 text-xs shadow-2xs">
+              <Copy className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <div>
+                <span className="font-bold">Mode Duplikat Transaksi:</span> Tanggal (<strong>{formData.tanggal}</strong>) dan No. Surat (<strong>{formData.noSurat || '-'}</strong>) secara otomatis disamakan. Sesuaikan penerima atau nominal jika diperlukan.
+              </div>
+            </div>
+          )}
+
           {/* TIPE TRANSAKSI SELECTOR (TRANSAKSI MASUK vs TRANSAKSI KELUAR) */}
           <div className="bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl flex items-center gap-1 border border-slate-200 dark:border-slate-700">
             <button
@@ -326,6 +436,64 @@ export function AddEditTransactionModal({
           </div>
 
           <div className="bg-slate-50/60 dark:bg-slate-800/30 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
+            
+            {/* PRESET HONOR QUICK AUTOFILL */}
+            {honorRecipients.length > 0 && formData.tipeTransaksi !== 'MASUK' && (
+              <div className="bg-amber-500/10 border border-amber-300 dark:border-amber-700/80 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="font-bold text-slate-800 dark:text-amber-200 text-xs">
+                    ⚡ Isi Otomatis dari Master Honor:
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 flex-1 min-w-[220px] justify-end">
+                  <select
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      if (!selectedId) return;
+                      const found = honorRecipients.find((r) => r.id === selectedId);
+                      if (found) {
+                        const ket = found.keteranganDefault?.trim()
+                          ? `${found.keteranganDefault.trim()} Bulan ${formData.bulan || 'Januari'} ${formData.tahun || new Date().getFullYear()}`
+                          : `Pembayaran Honorarium ${found.namaPenerima}`;
+                        setFormData((prev) => ({
+                          ...prev,
+                          jenisTransaksi: 'Pembayaran Honor',
+                          namaPenerima: found.namaPenerima,
+                          noRekPenerima: found.noRekPenerima || '-',
+                          namaBank: found.namaBank || 'BJB',
+                          netto: found.netto || 0,
+                          pph: found.pph || '-',
+                          ppn: found.ppn || '-',
+                          keterangan: ket,
+                          kategori: found.kategoriDefault || 'JASA KANTOR',
+                        }));
+                      }
+                    }}
+                    defaultValue=""
+                    className="w-full sm:w-auto px-2.5 py-1.5 text-xs font-semibold border border-amber-300 dark:border-amber-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 max-w-xs cursor-pointer truncate"
+                  >
+                    <option value="">-- Pilih Guru / Staff / Penerima Honor --</option>
+                    {honorRecipients.map((rec) => (
+                      <option key={rec.id} value={rec.id}>
+                        {rec.namaPenerima} ({rec.jabatan || 'Honor'}) - Rp {(rec.netto || 0).toLocaleString('id-ID')}
+                      </option>
+                    ))}
+                  </select>
+                  {onOpenHonorSettings && (
+                    <button
+                      type="button"
+                      onClick={onOpenHonorSettings}
+                      className="px-2 py-1 text-[11px] text-amber-800 dark:text-amber-200 bg-amber-200/60 dark:bg-amber-900/60 hover:bg-amber-300/60 dark:hover:bg-amber-800/80 rounded-lg font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                      title="Kelola Master Data Honorarium"
+                    >
+                      ⚙️ Master Honor
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* ROW 1: NO URUT (AUTOMATIC), TANGGAL (PICKER), NO SURAT SI */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
               <div>
@@ -407,19 +575,44 @@ export function AddEditTransactionModal({
               </div>
             </div>
 
-            {/* ROW 3: REKENING, BANK, NETTO */}
+            {/* ROW 3: REKENING & BANK */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-              <div>
-                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  No. Rekening Penerima
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-800 dark:text-slate-200 mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
+                    No. Rekening Penerima
+                  </span>
+                  {(!formData.noRekPenerima || formData.noRekPenerima.trim() === '' || formData.noRekPenerima.trim() === '-') ? (
+                    <span className="text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                      Kosong (Diperlukan saat cetak SI)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 px-1.5 py-0.5 rounded-md font-bold">
+                      ✓ Terisi
+                    </span>
+                  )}
                 </label>
-                <input
-                  type="text"
-                  value={formData.noRekPenerima || ''}
-                  onChange={(e) => setFormData({ ...formData, noRekPenerima: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="0122211231101"
-                />
+                <div className={`rounded-xl p-0.5 transition-all ${
+                  (!formData.noRekPenerima || formData.noRekPenerima.trim() === '' || formData.noRekPenerima.trim() === '-')
+                    ? 'border-2 border-amber-300 dark:border-amber-700 bg-amber-500/5 dark:bg-amber-950/20'
+                    : 'border-2 border-amber-400 dark:border-amber-600 bg-amber-500/10 dark:bg-amber-950/40'
+                }`}>
+                  <input
+                    type="text"
+                    value={formData.noRekPenerima || ''}
+                    onChange={(e) => setFormData({ ...formData, noRekPenerima: e.target.value })}
+                    className="w-full px-2.5 py-2 border-0 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
+                    placeholder="0122211231101 (Boleh dikosongkan dulu)"
+                  />
+                </div>
+                {(!formData.noRekPenerima || formData.noRekPenerima.trim() === '' || formData.noRekPenerima.trim() === '-') ? (
+                  <p className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3 shrink-0 text-amber-500" />
+                    Boleh dikosongkan sementara. Wajib diisi saat mencetak Surat Standing Instruction (SI).
+                  </p>
+                ) : null}
               </div>
 
               <div>
@@ -430,13 +623,17 @@ export function AddEditTransactionModal({
                   type="text"
                   value={formData.namaBank || ''}
                   onChange={(e) => setFormData({ ...formData, namaBank: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                   placeholder="BJB / BRI / Mandiri"
                 />
               </div>
+            </div>
 
+            {/* ROW 3.5: FINANCIAL & TAX (NETTO, PPH, PPN) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 bg-slate-100/70 dark:bg-slate-800/60 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/80">
+              {/* NOMINAL NETTO */}
               <div>
-                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block font-bold text-slate-800 dark:text-slate-200 mb-1">
                   Nominal Netto (Rp)
                 </label>
                 <input
@@ -444,9 +641,71 @@ export function AddEditTransactionModal({
                   value={formData.netto || ''}
                   onChange={(e) => setFormData({ ...formData, netto: Number(e.target.value) })}
                   className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="2500000"
+                  placeholder="1500000"
                   required
                 />
+              </div>
+
+              {/* PPH */}
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                  <span>Potongan PPh</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Untuk SI</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.pph || ''}
+                  onChange={(e) => setFormData({ ...formData, pph: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs"
+                  placeholder="-"
+                />
+                <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                  {['-', '1.5%', '2%', '5%', '21'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setFormData((prev) => ({ ...prev, pph: preset }))}
+                      className={`px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer ${
+                        formData.pph === preset
+                          ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* PPN */}
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                  <span>Potongan PPN</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Untuk SI</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.ppn || ''}
+                  onChange={(e) => setFormData({ ...formData, ppn: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs"
+                  placeholder="-"
+                />
+                <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                  {['-', '11%', '12%'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setFormData((prev) => ({ ...prev, ppn: preset }))}
+                      className={`px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer ${
+                        formData.ppn === preset
+                          ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -544,15 +803,28 @@ export function AddEditTransactionModal({
 
                 {/* 2. NO PO */}
                 <div>
-                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    No. PO (Jika Siplah)
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                    <span>No. PO {formData.siplah === 'Non Siplah' ? '(Non-Siplah)' : '(Siplah)'}</span>
+                    {formData.siplah === 'Non Siplah' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const freshNoPo = generateNonSiplahNoPo(formData.bulan, formData.tahun, dateIso);
+                          setFormData((prev) => ({ ...prev, noPo: freshNoPo }));
+                        }}
+                        className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        title="Acak Ulang No. PO Non Siplah"
+                      >
+                        <span>🎲 Acak No. PO</span>
+                      </button>
+                    )}
                   </label>
                   <input
                     type="text"
                     value={formData.noPo || ''}
                     onChange={(e) => setFormData({ ...formData, noPo: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="PO65AF1A4418431"
+                    placeholder={formData.siplah === 'Non Siplah' ? 'trx/xxxx/I/2026' : 'PO65AF1A4418431'}
                   />
                 </div>
 
@@ -563,7 +835,26 @@ export function AddEditTransactionModal({
                   </label>
                   <select
                     value={formData.siplah || 'Non Siplah'}
-                    onChange={(e) => setFormData({ ...formData, siplah: e.target.value })}
+                    onChange={(e) => {
+                      const newSiplah = e.target.value;
+                      setFormData((prev) => {
+                        let updatedNoPo = prev.noPo || '';
+                        if (newSiplah === 'Non Siplah') {
+                          if (!updatedNoPo || !updatedNoPo.startsWith('trx/')) {
+                            updatedNoPo = generateNonSiplahNoPo(prev.bulan, prev.tahun, dateIso);
+                          }
+                        } else if (newSiplah === 'Siplah') {
+                          if (updatedNoPo.startsWith('trx/')) {
+                            updatedNoPo = '';
+                          }
+                        }
+                        return {
+                          ...prev,
+                          siplah: newSiplah,
+                          noPo: updatedNoPo,
+                        };
+                      });
+                    }}
                     className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-medium"
                   >
                     <option value="Non Siplah">Non Siplah</option>

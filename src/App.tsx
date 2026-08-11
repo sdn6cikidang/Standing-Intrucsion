@@ -1,20 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, SchoolSettings, Vendor } from './types';
+import { Transaction, SchoolSettings, Vendor, HonorRecipient } from './types';
 import { INITIAL_TRANSACTIONS } from './data/initialTransactions';
 import { DEFAULT_SCHOOL_SETTINGS } from './data/defaultSettings';
 import { DEFAULT_VENDORS } from './data/defaultVendors';
+import { DEFAULT_HONOR_RECIPIENTS } from './data/defaultHonorRecipients';
 import { TransactionTable } from './components/TransactionTable';
 import { StandingInstructionModal } from './components/StandingInstructionModal';
 import { AddEditTransactionModal } from './components/AddEditTransactionModal';
 import { SchoolSettingsModal } from './components/SchoolSettingsModal';
 import { CategoryManagementModal, DEFAULT_CATEGORIES } from './components/CategoryManagementModal';
+import { HonorManagementModal } from './components/HonorManagementModal';
+import { BatchHonorModal } from './components/BatchHonorModal';
 import { ImportExportModal } from './components/ImportExportModal';
+import { NonSiplahProofModal } from './components/NonSiplahProofModal';
+import { PlanningDocModal } from './components/PlanningDocModal';
 import { ActivationModal } from './components/ActivationModal';
+import { DemoLimitModal } from './components/DemoLimitModal';
 import { getStoredLicenseInfo, verifySerialNumber, getMachineId } from './utils/licenseUtils';
 import { DashboardStats } from './components/DashboardStats';
 import { LogoBandungBarat, LogoTutWuri } from './components/Logos';
-import { Sun, Moon, Settings, Store, Cloud, KeyRound, ShieldCheck } from 'lucide-react';
+import { Sun, Moon, Settings, Store, Cloud, KeyRound, ShieldCheck, Sparkles, UserCheck, FileSpreadsheet, Database, Plus, FileText, ClipboardList } from 'lucide-react';
 import { sanitizeSchoolSettingsForSync, ensureTransactionIds } from './utils/googleAppsScript';
+
+const MAX_DEMO_TRANSACTIONS = 3;
 
 export default function App() {
   // Theme state
@@ -83,6 +91,21 @@ export default function App() {
     return DEFAULT_CATEGORIES;
   });
 
+  const [honorRecipients, setHonorRecipients] = useState<HonorRecipient[]>(() => {
+    const saved = localStorage.getItem('bosp_honor_recipients_db');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        console.error('Failed to parse honor recipients:', e);
+      }
+    }
+    return DEFAULT_HONOR_RECIPIENTS;
+  });
+
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // License Activation State
@@ -92,12 +115,19 @@ export default function App() {
     return info.isActivated && verifySerialNumber(info.serialKey, mid);
   });
   const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
+  const [isDemoLimitModalOpen, setIsDemoLimitModalOpen] = useState(false);
 
   // Modal States
   const [isSiModalOpen, setIsSiModalOpen] = useState(false);
+  const [isNonSiplahModalOpen, setIsNonSiplahModalOpen] = useState(false);
+  const [nonSiplahTargetTx, setNonSiplahTargetTx] = useState<Transaction[]>([]);
+  const [isPlanningDocModalOpen, setIsPlanningDocModalOpen] = useState(false);
+  const [planningDocTargetTx, setPlanningDocTargetTx] = useState<Transaction[]>([]);
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isHonorSettingsModalOpen, setIsHonorSettingsModalOpen] = useState(false);
+  const [isBatchHonorModalOpen, setIsBatchHonorModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'school' | 'vendors' | 'categories'>('school');
   const [isImportExportModalOpen, setIsImportExportModalOpen] = useState(false);
 
@@ -119,6 +149,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('bosp_categories', JSON.stringify(categories));
   }, [categories]);
+
+  useEffect(() => {
+    localStorage.setItem('bosp_honor_recipients_db', JSON.stringify(honorRecipients));
+  }, [honorRecipients]);
 
   // Helper to push to Google Sheets automatically if URL exists
   const syncToGoogleSheets = async (
@@ -227,6 +261,56 @@ export default function App() {
     setIsSiModalOpen(true);
   };
 
+  const handleOpenNonSiplahProof = (targetTx?: Transaction) => {
+    if (targetTx) {
+      setNonSiplahTargetTx([targetTx]);
+    } else if (selectedIds.length > 0) {
+      const selectedList = transactions.filter(
+        (t) => selectedIds.includes(String(t.id)) || selectedIds.includes(String(t.no))
+      );
+      if (selectedList.length > 0) {
+        setNonSiplahTargetTx(selectedList);
+      } else {
+        setNonSiplahTargetTx(transactions);
+      }
+    } else {
+      const nonSiplahList = transactions.filter(
+        (t) =>
+          t.siplah === 'Non Siplah' ||
+          t.siplah === 'NON SIPLAH' ||
+          t.vendor === 'NON SIPLAH' ||
+          (t.vendor || '').toUpperCase().includes('NON')
+      );
+      setNonSiplahTargetTx(nonSiplahList.length > 0 ? nonSiplahList : transactions);
+    }
+    setIsNonSiplahModalOpen(true);
+  };
+
+  const handleOpenPlanningDoc = (targetTx?: Transaction) => {
+    if (targetTx) {
+      setPlanningDocTargetTx([targetTx]);
+    } else if (selectedIds.length > 0) {
+      const selectedList = transactions.filter(
+        (t) => selectedIds.includes(String(t.id)) || selectedIds.includes(String(t.no))
+      );
+      const outgoingSelected = selectedList.filter((t) => !t.tipeTransaksi || t.tipeTransaksi === 'KELUAR');
+      setPlanningDocTargetTx(outgoingSelected.length > 0 ? outgoingSelected : selectedList);
+    } else {
+      const outgoing = transactions.filter((t) => !t.tipeTransaksi || t.tipeTransaksi === 'KELUAR');
+      setPlanningDocTargetTx(outgoing.length > 0 ? outgoing : transactions);
+    }
+    setIsPlanningDocModalOpen(true);
+  };
+
+  const handleAddNewTransaction = () => {
+    if (!isActivated && transactions.length >= MAX_DEMO_TRANSACTIONS) {
+      setIsDemoLimitModalOpen(true);
+      return;
+    }
+    setEditingTx(null);
+    setIsAddEditModalOpen(true);
+  };
+
   // Save/Update transaction
   const handleSaveTransaction = (tx: Transaction) => {
     const safePrev = ensureTransactionIds(transactions);
@@ -241,6 +325,13 @@ export default function App() {
       idx = safePrev.findIndex((t) => Number(t.no) === Number(tx.no));
     }
 
+    const isAddingNew = idx === -1;
+    if (!isActivated && isAddingNew && safePrev.length >= MAX_DEMO_TRANSACTIONS) {
+      setIsAddEditModalOpen(false);
+      setIsDemoLimitModalOpen(true);
+      return;
+    }
+
     const safeTx: Transaction = {
       ...tx,
       id: targetId || (idx >= 0 && safePrev[idx]?.id ? String(safePrev[idx].id) : `tx-${tx.no || Date.now()}-${Math.random().toString(36).substring(2, 7)}`),
@@ -253,6 +344,22 @@ export default function App() {
       updatedTxList[idx] = safeTx;
     } else {
       updatedTxList = [safeTx, ...safePrev];
+    }
+
+    setTransactions(updatedTxList);
+    syncToGoogleSheets(updatedTxList, schoolSettings, vendors);
+  };
+
+  const handleSaveBatchTransactions = (newTxs: Transaction[]) => {
+    const safePrev = ensureTransactionIds(transactions);
+    let updatedTxList = [...newTxs, ...safePrev];
+
+    if (!isActivated && updatedTxList.length > MAX_DEMO_TRANSACTIONS) {
+      updatedTxList = updatedTxList.slice(0, MAX_DEMO_TRANSACTIONS);
+      setTransactions(updatedTxList);
+      syncToGoogleSheets(updatedTxList, schoolSettings, vendors);
+      setIsDemoLimitModalOpen(true);
+      return;
     }
 
     setTransactions(updatedTxList);
@@ -314,6 +421,15 @@ export default function App() {
     } else {
       updated = safeNew;
     }
+
+    if (!isActivated && updated.length > MAX_DEMO_TRANSACTIONS) {
+      updated = updated.slice(0, MAX_DEMO_TRANSACTIONS);
+      setTransactions(updated);
+      syncToGoogleSheets(updated, schoolSettings, vendors);
+      setIsDemoLimitModalOpen(true);
+      return;
+    }
+
     setTransactions(updated);
     syncToGoogleSheets(updated, schoolSettings, vendors);
   };
@@ -334,7 +450,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200 pb-16">
       
       {/* HEADER SECTION - BENTO STYLE */}
-      <header className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 sticky top-0 z-30">
+      <header className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 pt-4 sticky top-0 z-30">
         <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shrink-0 shadow-sm overflow-hidden p-1">
@@ -349,17 +465,21 @@ export default function App() {
               )}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white leading-tight">
                   {schoolSettings.namaSekolah || 'SD NEGERI CIBURIAL'}
                 </h1>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-indigo-100 dark:bg-indigo-950/90 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[10px] font-black uppercase tracking-wide">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  DATABASE TRANSAKSI BOSP
+                </span>
                 <div className={`hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-semibold ${
                   isActivated
                     ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border-emerald-100 dark:border-emerald-800'
-                    : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 border-rose-100 dark:border-rose-800'
+                    : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800'
                 }`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${isActivated ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
-                  <span>{isActivated ? 'Lisensi Teraktivasi ✓' : 'Lisensi Belum Teraktivasi'}</span>
+                  <div className={`w-1.5 h-1.5 rounded-full ${isActivated ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-pulse'}`}></div>
+                  <span>{isActivated ? 'Lisensi Teraktivasi ✓' : `Versi Demo (${transactions.length}/${MAX_DEMO_TRANSACTIONS} Transaksi)`}</span>
                 </div>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
@@ -368,66 +488,155 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5 flex-wrap justify-end">
+            {/* 1. PRIMARY ACTION: TAMBAH TRANSAKSI */}
             <button
-              onClick={() => setIsActivationModalOpen(true)}
-              className={`px-3 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border ${
-                isActivated
-                  ? 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950 font-black border-amber-400 shadow-sm animate-bounce'
-              }`}
-              title="Status Aktivasi & Serial Number Application"
+              onClick={handleAddNewTransaction}
+              className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-98 rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Tambah Transaksi BOSP Baru"
             >
-              <KeyRound className="w-4 h-4" />
-              <span className="hidden sm:inline">{isActivated ? 'Lisensi Aktif' : 'Aktivasi Serial'}</span>
+              <Plus className="w-4 h-4" />
+              <span>Tambah Transaksi</span>
             </button>
 
-            <button
-              onClick={() => setIsImportExportModalOpen(true)}
-              className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-              title="Integrasi Database Google Spreadsheet & Apps Script"
-            >
-              <Cloud className="w-4 h-4" />
-              <span className="hidden sm:inline">Database Spreadsheet</span>
-            </button>
+            {/* 2. DOKUMEN & DATABASE GROUP */}
+            <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/80 gap-1 shrink-0">
+              <button
+                onClick={() => handleOpenPlanningDoc()}
+                className="px-2.5 py-1.5 text-xs font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs border border-slate-200 dark:border-slate-600"
+                title="Cetak & Kelola Dokumen Perencanaan Pengadaan Barang/Jasa BOSP"
+              >
+                <ClipboardList className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Dokumen Perencanaan</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setSettingsInitialTab('vendors');
-                setIsSettingsModalOpen(true);
-              }}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors border border-slate-200 dark:border-slate-700 flex items-center gap-1.5"
-              title="Kelola Master Vendor"
-            >
-              <Store className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span className="hidden sm:inline">Kelola Vendor</span>
-            </button>
+              <button
+                onClick={() => handleOpenNonSiplahProof()}
+                className="px-2.5 py-1.5 text-xs font-black text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Cetak & Kelola Berkas Bukti Fisik Transaksi Non-SIPLAH"
+              >
+                <FileText className="w-3.5 h-3.5 text-slate-950" />
+                <span>Bukti Fisik Non-SIPLAH</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setSettingsInitialTab('school');
-                setIsSettingsModalOpen(true);
-              }}
-              className="p-2.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
-              title="Pengaturan Kop Surat & TTD"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
+              <button
+                onClick={() => setIsImportExportModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Kelola Database Transaksi BOSP & Integrasi Google Spreadsheet"
+              >
+                <Database className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden sm:inline">Database Spreadsheet</span>
+              </button>
+            </div>
 
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
-              title="Ganti Tema Mode Gelap/Terang"
-            >
-              {darkMode ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-indigo-600" />}
-            </button>
+            {/* 3. HONORARIUM GROUP */}
+            <div className="flex items-center p-1 bg-amber-500/10 dark:bg-amber-950/30 rounded-xl border border-amber-300/60 dark:border-amber-800/60 gap-1 shrink-0">
+              <button
+                onClick={() => setIsBatchHonorModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs font-bold text-amber-950 dark:text-amber-100 bg-amber-400 hover:bg-amber-300 dark:bg-amber-600 dark:hover:bg-amber-500 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Input Massal Honor Guru & Staff Sekaligus"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-slate-950 dark:text-white" />
+                <span>Input Massal Honor</span>
+              </button>
+
+              <button
+                onClick={() => setIsHonorSettingsModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200 hover:bg-amber-200/60 dark:hover:bg-amber-900/60 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Pengaturan Master Data Honorarium Guru & Tendik"
+              >
+                <UserCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span className="hidden sm:inline">Master Honor</span>
+              </button>
+            </div>
+
+            {/* 4. MASTER VENDOR & SETTINGS GROUP */}
+            <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/80 gap-0.5 shrink-0">
+              <button
+                onClick={() => {
+                  setSettingsInitialTab('vendors');
+                  setIsSettingsModalOpen(true);
+                }}
+                className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Kelola Master Vendor / Toko"
+              >
+                <Store className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden lg:inline">Kelola Vendor</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setSettingsInitialTab('school');
+                  setIsSettingsModalOpen(true);
+                }}
+                className="p-1.5 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                title="Pengaturan Kop Surat & TTD Sekolah"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 5. SYSTEM: LISENSI & TEMA */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setIsActivationModalOpen(true)}
+                className={`px-2.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  isActivated
+                    ? 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black border-amber-400 shadow-2xs'
+                }`}
+                title="Status Aktivasi & Serial Number Aplikasi"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{isActivated ? 'Lisensi' : 'Aktivasi'}</span>
+              </button>
+
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors border border-slate-200/80 dark:border-slate-700/80 cursor-pointer"
+                title="Ganti Tema Mode Gelap/Terang"
+              >
+                {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-600" />}
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* MAIN CONTAINER */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+      <main className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 pt-6 space-y-6">
         
+        {/* DEMO MODE BANNER (Shown if not activated) */}
+        {!isActivated && (
+          <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-amber-500/15 border border-amber-300 dark:border-amber-700/80 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 font-extrabold shadow-xs">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-amber-200">
+                    Aplikasi Berjalan Dalam Mode Demo
+                  </h3>
+                  <span className="bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-100 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-300 dark:border-amber-700">
+                    {transactions.length}/{MAX_DEMO_TRANSACTIONS} Transaksi Terpakai
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                  Anda dapat mencoba menambah hingga {MAX_DEMO_TRANSACTIONS} data transaksi. Aktivasi lisensi untuk kapasitas transaksi unlimited.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsActivationModalOpen(true)}
+              className="px-4 py-2 text-xs font-black bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4" />
+              Beli / Aktivasi Lisensi
+            </button>
+          </div>
+        )}
+
         {/* STATS OVERVIEW & SHORTCUTS */}
         <DashboardStats
           transactions={transactions}
@@ -444,18 +653,31 @@ export default function App() {
           onSelectGroupNoSurat={handleSelectGroupNoSurat}
           onGenerateSIForSelected={handleGenerateSIForSelected}
           onGenerateSIForNoSurat={handleGenerateSIForNoSurat}
-          onAddNew={() => {
-            setEditingTx(null);
-            setIsAddEditModalOpen(true);
-          }}
+          onAddNew={handleAddNewTransaction}
           onEdit={(tx) => {
             setEditingTx(tx);
+            setIsAddEditModalOpen(true);
+          }}
+          onDuplicate={(tx) => {
+            if (!isActivated && transactions.length >= MAX_DEMO_TRANSACTIONS) {
+              setIsDemoLimitModalOpen(true);
+              return;
+            }
+            const nextNumber = transactions.length > 0 ? Math.max(...transactions.map((t) => t.no || 0)) + 1 : 1;
+            const duplicateTx: Transaction = {
+              ...tx,
+              id: '', // Strip ID so it creates a new entry
+              no: nextNumber, // Auto assign next available sequence number
+            };
+            setEditingTx(duplicateTx);
             setIsAddEditModalOpen(true);
           }}
           onDelete={handleDeleteTransaction}
           onBulkDelete={handleBulkDeleteTransactions}
           onOpenImportExport={() => setIsImportExportModalOpen(true)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
+          onOpenNonSiplahProof={handleOpenNonSiplahProof}
+          onOpenPlanningDoc={handleOpenPlanningDoc}
         />
       </main>
 
@@ -485,12 +707,16 @@ export default function App() {
         nextNo={transactions.length > 0 ? Math.max(...transactions.map((t) => t.no || 0)) + 1 : 1}
         vendors={vendors}
         categories={categories}
+        honorRecipients={honorRecipients}
         onOpenVendorSettings={() => {
           setSettingsInitialTab('vendors');
           setIsSettingsModalOpen(true);
         }}
         onOpenCategoryManagement={() => {
           setIsCategoryModalOpen(true);
+        }}
+        onOpenHonorSettings={() => {
+          setIsHonorSettingsModalOpen(true);
         }}
       />
 
@@ -548,14 +774,68 @@ export default function App() {
 
       {/* 6. ACTIVATION / SERIAL NUMBER MODAL */}
       <ActivationModal
-        isOpen={!isActivated || isActivationModalOpen}
+        isOpen={isActivationModalOpen}
         onClose={() => setIsActivationModalOpen(false)}
-        isLockScreen={!isActivated}
+        isLockScreen={false}
         schoolSettings={schoolSettings}
         onActivationSuccess={() => {
           setIsActivated(true);
           setIsActivationModalOpen(false);
         }}
+      />
+
+      {/* 7. DEMO LIMIT WARNING MODAL */}
+      <DemoLimitModal
+        isOpen={isDemoLimitModalOpen}
+        onClose={() => setIsDemoLimitModalOpen(false)}
+        onOpenActivation={() => {
+          setIsDemoLimitModalOpen(false);
+          setIsActivationModalOpen(true);
+        }}
+        currentCount={transactions.length}
+        maxLimit={MAX_DEMO_TRANSACTIONS}
+      />
+
+      {/* 8. MASTER HONOR MANAGEMENT MODAL */}
+      <HonorManagementModal
+        isOpen={isHonorSettingsModalOpen}
+        onClose={() => setIsHonorSettingsModalOpen(false)}
+        honorRecipients={honorRecipients}
+        onSaveHonorRecipients={(newRecipients) => {
+          setHonorRecipients(newRecipients);
+        }}
+        onOpenBatchModal={() => setIsBatchHonorModalOpen(true)}
+      />
+
+      {/* 9. BATCH HONOR TRANSACTIONS ENTRY MODAL */}
+      <BatchHonorModal
+        isOpen={isBatchHonorModalOpen}
+        onClose={() => setIsBatchHonorModalOpen(false)}
+        honorRecipients={honorRecipients}
+        schoolSettings={schoolSettings}
+        nextNo={transactions.length > 0 ? Math.max(...transactions.map((t) => t.no || 0)) + 1 : 1}
+        onSaveBatchTransactions={handleSaveBatchTransactions}
+        onOpenHonorSettings={() => setIsHonorSettingsModalOpen(true)}
+      />
+
+      {/* 10. NON-SIPLAH PHYSICAL PROOF DOCUMENTS MODAL */}
+      <NonSiplahProofModal
+        isOpen={isNonSiplahModalOpen}
+        onClose={() => setIsNonSiplahModalOpen(false)}
+        transactions={nonSiplahTargetTx}
+        settings={schoolSettings}
+        vendors={vendors}
+        onSaveTransaction={handleSaveTransaction}
+      />
+
+      {/* 11. PLANNING DOCUMENTS (DOKUMEN PERENCANAAN) MODAL */}
+      <PlanningDocModal
+        isOpen={isPlanningDocModalOpen}
+        onClose={() => setIsPlanningDocModalOpen(false)}
+        transactions={planningDocTargetTx}
+        settings={schoolSettings}
+        vendors={vendors}
+        onSaveTransaction={handleSaveTransaction}
       />
     </div>
   );

@@ -23,6 +23,13 @@ export interface Transaction {
   deskripsiFull: string;
   kategori: string;
   tipeTransaksi?: 'MASUK' | 'KELUAR';
+  activityType?: 'HONOR' | 'KONSUMSI' | 'BARANG_JASA';
+  noUndangan?: string;
+  noBast?: string;
+  noKwitansi?: string;
+  noBkk?: string;
+  tempatAcara?: string;
+  agendaRapat?: string;
 }
 
 export interface Vendor {
@@ -31,6 +38,19 @@ export interface Vendor {
   alamat?: string;
   hp?: string;
   npwp?: string;
+}
+
+export interface HonorRecipient {
+  id: string;
+  namaPenerima: string;
+  jabatan?: string;
+  noRekPenerima: string;
+  namaBank: string;
+  netto: number;
+  pph?: string;
+  ppn?: string;
+  keteranganDefault?: string;
+  kategoriDefault?: string;
 }
 
 export interface OfficerInfo {
